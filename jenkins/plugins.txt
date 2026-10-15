@@ -1,0 +1,13 @@
+workflow-aggregator
+git
+github
+github-branch-source
+cloudbees-folder
+configuration-as-code
+job-dsl
+credentials-binding
+junit
+timestamps
+ws-cleanup
+build-timeout
+pipeline-stage-view

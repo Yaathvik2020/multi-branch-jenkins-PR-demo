@@ -1,0 +1,108 @@
+pipeline {
+  agent any
+
+  environment {
+    APP_NAME = 'demo-app'
+    IMAGE    = "demo-app:${env.BUILD_NUMBER}"
+  }
+
+  options {
+    timeout(time: 20, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+    disableConcurrentBuilds(abortPrevious: true)   // a new push cancels the older build of the same PR
+    timestamps()
+  }
+
+  stages {
+
+    stage('Build Info') {
+      steps {
+        script {
+          if (env.CHANGE_ID) {
+            echo "=== PULL REQUEST #${env.CHANGE_ID}: ${env.CHANGE_TITLE}"
+            echo "=== From '${env.CHANGE_BRANCH}' into '${env.CHANGE_TARGET}'"
+            echo "=== Author: ${env.CHANGE_AUTHOR}"
+            echo "=== URL: ${env.CHANGE_URL}"
+          } else {
+            echo "=== BRANCH build: ${env.BRANCH_NAME}"
+          }
+        }
+      }
+    }
+
+    stage('Build') {
+      steps { sh 'mvn -B -q clean compile' }
+    }
+
+    stage('Unit Tests') {
+      steps { sh 'mvn -B test' }
+      post {
+        always { junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml' }
+      }
+    }
+
+    stage('Package') {
+      steps { sh 'mvn -B -q package -DskipTests' }
+      post {
+        success { archiveArtifacts artifacts: 'target/*.jar', fingerprint: true }
+      }
+    }
+
+    // ============================================================
+    // Stages below run ONLY after a merge. A PR build never gets here.
+    // ============================================================
+
+    stage('Docker Build') {
+      when {
+        allOf {
+          not { changeRequest() }
+          anyOf { branch 'develop'; branch 'main' }
+        }
+      }
+      steps {
+        sh "docker build -t ${IMAGE} ."
+      }
+    }
+
+    stage('Deploy to DEV') {
+      when {
+        allOf { not { changeRequest() }; branch 'develop' }
+      }
+      steps {
+        sh '''
+          docker rm -f demo-app-dev || true
+          docker run -d --name demo-app-dev -p 8081:8080 -e APP_ENV=DEV ${IMAGE}
+        '''
+        echo 'DEV is live: http://localhost:8081'
+      }
+    }
+
+    stage('Approval for PROD') {
+      when {
+        allOf { not { changeRequest() }; branch 'main' }
+      }
+      steps {
+        input message: 'Deploy to PRODUCTION?', ok: 'Deploy'
+      }
+    }
+
+    stage('Deploy to PROD') {
+      when {
+        allOf { not { changeRequest() }; branch 'main' }
+      }
+      steps {
+        sh '''
+          docker rm -f demo-app-prod || true
+          docker run -d --name demo-app-prod -p 8082:8080 -e APP_ENV=PROD ${IMAGE}
+        '''
+        echo 'PROD is live: http://localhost:8082'
+      }
+    }
+  }
+
+  post {
+    success { echo "SUCCESS: ${env.BRANCH_NAME}" }
+    failure { echo "FAILED: ${env.BRANCH_NAME}" }
+    always  { cleanWs() }
+  }
+}

@@ -1,0 +1,17 @@
+services:
+  jenkins:
+    build: .
+    container_name: jenkins-pr-demo
+    user: root                      # demo only: lets Jenkins use the host Docker socket
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - ./casc:/var/jenkins_home/casc:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  jenkins_home:
